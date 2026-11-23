@@ -1,4 +1,3 @@
-
 import os
 import time
 import csv
@@ -9,16 +8,19 @@ from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==========================================================
-# 1. VOS IDENTIFIANTS DEJA CONFIGURES (NE RIEN TOUCHER)
+# 1. CONFIGURATION (METTEZ JUSTE VOTRE CLE A LA LIGNE 15)
 # ==========================================================
-TOKEN (= "8651565062:AAHV7PeegR8P1xPKl-9x47oHKT_108cmkq4")
+TOKEN = "8651565062:AAHV7PeegR8P1xPKl-9x47oHKT_108cmkq4"
 CHAT_ID = "8048025198"
+ODDS_API_KEY = "a5b5d0b7af9a8389b06b268a71d361c6"
+
 HEURE_ENVOI_SOIR = 22  # 22:00 Heure de Conakry (GMT)
 
 TOKEN = str(TOKEN).strip()
 if TOKEN.startswith("bot"):
     TOKEN = TOKEN[3:]
 CHAT_ID = str(CHAT_ID).strip()
+ODDS_API_KEY = str(ODDS_API_KEY).strip()
 
 # ==========================================================
 # 2. SERVEUR WEB POUR GARDER RENDER ACTIF 24H/24
@@ -69,26 +71,26 @@ def envoyer_telegram(message):
 # 4. BASE DE DONNEES : STATISTIQUES DES 15 DERNIERS MATCHS
 # ==========================================================
 LIGUES_CSV = [
-    ("Angleterre - Premier League", "E0", "eng.1"),
-    ("Angleterre - Championship", "E1", "eng.2"),
-    ("Espagne - La Liga", "SP1", "esp.1"),
-    ("Italie - Serie A", "I1", "ita.1"),
-    ("Allemagne - Bundesliga", "D1", "ger.1"),
-    ("Allemagne - Bundesliga 2", "D2", "ger.2"),
-    ("France - Ligue 1", "F1", "fra.1"),
-    ("France - Ligue 2", "F2", "fra.2"),
-    ("Pays-Bas - Eredivisie", "N1", "ned.1"),
-    ("Portugal - Liga Portugal", "P1", "por.1"),
-    ("Belgique - Pro League", "B1", "bel.1"),
-    ("Turquie - Super Lig", "T1", "tur.1"),
-    ("Ecosse - Premiership", "SC0", "sco.1")
+    ("Angleterre - Premier League", "E0", "eng.1", "soccer_epl"),
+    ("Angleterre - Championship", "E1", "eng.2", "soccer_efl_champ"),
+    ("Espagne - La Liga", "SP1", "esp.1", "soccer_spain_la_liga"),
+    ("Italie - Serie A", "I1", "ita.1", "soccer_italy_serie_a"),
+    ("Allemagne - Bundesliga", "D1", "ger.1", "soccer_germany_bundesliga"),
+    ("Allemagne - Bundesliga 2", "D2", "ger.2", "soccer_germany_bundesliga2"),
+    ("France - Ligue 1", "F1", "fra.1", "soccer_france_ligue_one"),
+    ("France - Ligue 2", "F2", "fra.2", "soccer_france_ligue_two"),
+    ("Pays-Bas - Eredivisie", "N1", "ned.1", "soccer_netherlands_eredivisie"),
+    ("Portugal - Liga Portugal", "P1", "por.1", "soccer_portugal_primeira_liga"),
+    ("Belgique - Pro League", "B1", "bel.1", "soccer_belgium_first_div"),
+    ("Turquie - Super Lig", "T1", "tur.1", "soccer_turkey_super_league"),
+    ("Ecosse - Premiership", "SC0", "sco.1", "soccer_spl")
 ]
 
 def charger_historique_15_matchs():
     stats_equipes = {}
     saisons = ["2526", "2425"]
 
-    for nom_ligue, code_csv, _ in LIGUES_CSV:
+    for nom_ligue, code_csv, _, _ in LIGUES_CSV:
         texte_csv = None
         for s in saisons:
             url = f"https://www.football-data.co.uk/mmz4281/{s}/{code_csv}.csv"
@@ -167,91 +169,8 @@ def trouver_equipe(nom_api, stats_equipes):
     return None
 
 # ==========================================================
-# 5. MATCHS DU JOUR ET CALCUL DU TOP 3 CORNERS & OVER 2.5
+# 5. MATCHS DU JOUR (ODDS API + ESPN) & ANALYSE SNIPER
 # ==========================================================
 def recuperer_matchs_du_jour():
     matchs = []
-    for nom_ligue, _, code_espn in LIGUES_CSV:
-        url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{code_espn}/scoreboard"
-        try:
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                for ev in data.get("events", []):
-                    comp = ev.get("competitions", [{}])[0]
-                    equipes = comp.get("competitors", [])
-                    if len(equipes) == 2:
-                        dom = next((e["team"]["displayName"] for e in equipes if e.get("homeAway") == "home"), "")
-                        ext = next((e["team"]["displayName"] for e in equipes if e.get("homeAway") == "away"), "")
-                        date_str = ev.get("date", "")
-                        heure = date_str[11:16] if len(date_str) >= 16 else "20:00"
-                        matchs.append({"dom": dom, "ext": ext, "ligue": nom_ligue, "heure": heure})
-        except Exception:
-            continue
-    return matchs
-
-def generer_pronostics_sniper():
-    try:
-        stats = charger_historique_15_matchs()
-        matchs_jour = recuperer_matchs_du_jour()
-
-        candidats_corners = []
-        candidats_over25 = []
-
-        liste_analyse = []
-        for m in matchs_jour:
-            eq_dom = trouver_equipe(m["dom"], stats)
-            eq_ext = trouver_equipe(m["ext"], stats)
-            if eq_dom and eq_ext:
-                liste_analyse.append((eq_dom, eq_ext, m["ligue"], m["heure"]))
-
-        if len(liste_analyse) < 6:
-            equipes_dispo = list(stats.keys())
-            for i in range(0, len(equipes_dispo) - 1, 2):
-                d = equipes_dispo[i]
-                e = equipes_dispo[i + 1]
-                if stats[d]["ligue"] == stats[e]["ligue"]:
-                    liste_analyse.append((d, e, stats[d]["ligue"], "20:00"))
-
-        for eq_dom, eq_ext, ligue, heure in liste_analyse:
-            dom_15 = stats[eq_dom]["dom"][-15:]
-            ext_15 = stats[eq_ext]["ext"][-15:]
-            tous_dom_15 = stats[eq_dom]["tous"][-15:]
-            tous_ext_15 = stats[eq_ext]["tous"][-15:]
-
-            if len(dom_15) < 5 or len(ext_15) < 5:
-                continue
-
-            nb_dom = len(dom_15)
-            valides_mt1 = sum(1 for x in dom_15 if x["corners_mt1_pour"] >= 2.0)
-            pct_corners_mt1 = int((valides_mt1 / nb_dom) * 100)
-            moy_corners_mt1_dom = round(sum(x["corners_mt1_pour"] for x in dom_15) / nb_dom, 1)
-            moy_conc_mt1_ext = round(sum(x["corners_mt1_contre"] for x in ext_15) / len(ext_15), 1)
-            score_corner = pct_corners_mt1 + (moy_corners_mt1_dom * 10) + (moy_conc_mt1_ext * 6)
-
-            candidats_corners.append({
-                "dom": eq_dom, "ext": eq_ext, "ligue": ligue, "heure": heure,
-                "valides": valides_mt1, "total": nb_dom, "pct": pct_corners_mt1,
-                "moy_dom": moy_corners_mt1_dom, "moy_ext": moy_conc_mt1_ext,
-                "score": score_corner
-            })
-
-            comb_15 = tous_dom_15 + tous_ext_15
-            nb_comb = len(comb_15)
-            nb_over25 = sum(1 for x in comb_15) if False else sum(x["over25"] for x in comb_15)
-            pct_over25 = int((nb_over25 / nb_comb) * 100)
-            moy_buts = round(sum(x["buts_tot"] for x in comb_15) / nb_comb, 2)
-            moy_tirs_cadres = round(sum(x["tirs_cadres"] for x in comb_15) / nb_comb, 1)
-            nb_zero = sum(x["zero_zero"] for x in comb_15)
-
-            score_over = pct_over25 + (moy_buts * 15) + (moy_tirs_cadres * 2) - (nb_zero * 10)
-
-            candidats_over25.append({
-                "dom": eq_dom, "ext": eq_ext, "ligue": ligue, "heure": heure,
-                "pct_over": pct_over25, "moy_buts": moy_buts,
-                "tirs_cadres": moy_tirs_cadres, "nb_total": nb_comb,
-                "score": score_over
-            })
-
-        top_corners = sorted(candidats_corners, key=lambda x: x["score"], reverse=True)[:3]
-        top_over25 = sorted(candidats_over25, key=lambda x: x["score"], 
+    
