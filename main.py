@@ -11,7 +11,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # ==========================================================
 # 1. VOS IDENTIFIANTS DEJA CONFIGURES (NE RIEN TOUCHER)
 # ==========================================================
-TOKEN = "8651565062:AAHV7PeegR8P1xPKl-9x47oHKT_108cmkq4"
+TOKEN (= "8651565062:AAHV7PeegR8P1xPKl-9x47oHKT_108cmkq4")
 CHAT_ID = "8048025198"
 HEURE_ENVOI_SOIR = 22  # 22:00 Heure de Conakry (GMT)
 
